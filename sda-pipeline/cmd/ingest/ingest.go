@@ -13,6 +13,7 @@ import (
 	"sda-pipeline/internal/broker"
 	"sda-pipeline/internal/config"
 	"sda-pipeline/internal/database"
+	"sda-pipeline/internal/kronika"
 	"sda-pipeline/internal/storage"
 
 	"github.com/google/uuid"
@@ -70,14 +71,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	archive, err := storage.NewBackend(conf.Archive)
-	if err != nil {
-		log.Fatal(err)
-	}
 	inbox, err := storage.NewBackend(conf.Inbox)
 	if err != nil {
 		log.Fatal(err)
 	}
+	kronikaClient := kronika.NewApiClient()
 
 	defer mq.Channel.Close()
 	defer mq.Connection.Close()
@@ -205,9 +203,37 @@ func main() {
 				log.Infof("Got file size (corr-id: %s, user: %s, filepath: %s, filesize: %d)",
 					delivered.CorrelationId, message.User, message.Filepath, fileSize)
 
+				// Define migration in Kronika archive
+				migrationResponse, err := kronikaClient.CreateMigrationResource()
+				if err != nil {
+					log.Errorf("Define migration fail: %s", err)
+					if e := delivered.Nack(false, true); e != nil {
+						log.Errorf("Failed to Nack message (failed get file size) (corr-id: %s, user: %s, filepath: %s, reason: %v)",
+							delivered.CorrelationId, message.User, message.Filepath, e)
+					}
+
+					// Restart on new message
+					continue
+				}
+				log.Infof("New migration defined: %s", migrationResponse.Id)
+
 				// Create a random uuid as file name
 				archivedFile := uuid.New().String()
-				dest, err := archive.NewFileWriter(archivedFile)
+
+				// Add new file to Kronika migration
+				newLocation, err := kronikaClient.CreateTemporaryLocationForFiles(migrationResponse, archivedFile, fileSize)
+				if err != nil {
+					log.Errorf("Add file to migration fail: %s", err)
+					if e := delivered.Nack(false, true); e != nil {
+						log.Errorf("Failed to Nack message (failed get file size) (corr-id: %s, user: %s, filepath: %s, reason: %v)",
+							delivered.CorrelationId, message.User, message.Filepath, e)
+					}
+
+					// Restart on new message
+					continue
+				}
+				log.Infof("New location (%s) defined in migration: %s", newLocation.Location, migrationResponse.Id)
+
 				if err != nil {
 					log.Errorf("Failed to create archive file (corr-id: %s, user: %s, filepath: %s, archivepath: %s, reason: %v)",
 						delivered.CorrelationId, message.User, message.Filepath, archivedFile, err)
@@ -324,31 +350,29 @@ func main() {
 						}
 					}
 
-					// Write data to file
-					if _, err = byteBuf.WriteTo(dest); err != nil {
-						log.Errorf("Failed to write to archive file (corr-id: %s, user: %s, filepath: %s, archivepath: %s, reason: %v)",
-							delivered.CorrelationId, message.User, message.Filepath, archivedFile, err)
+					_, err = kronikaClient.UploadDataToLocation(readBuffer, newLocation.Location, migrationResponse.Id, bytesRead, bufSize)
+					if err != nil {
+						log.Errorf("Failed to send file to Kronika (corr-id: %s, user: %s, filepath: %s, archivepath: %s, migrationid: %s, reason: %v)",
+							delivered.CorrelationId, message.User, message.Filepath, archivedFile, migrationResponse.Id, err)
 
 						continue mainWorkLoop
 					}
 				}
 
 				file.Close()
-				dest.Close()
+
+				_, err = kronikaClient.StartMigration(migrationResponse)
+				if err != nil {
+					log.Errorf("Failed to trigger migration to Kronika (corr-id: %s, user: %s, filepath: %s, archivepath: %s, migrationid: %s, reason: %v)",
+						delivered.CorrelationId, message.User, message.Filepath, archivedFile, migrationResponse.Id, err)
+				}
 
 				fileInfo := database.FileInfo{}
 				fileInfo.Path = archivedFile
 				fileInfo.Checksum = hash
-				fileInfo.Size, err = archive.GetFileSize(archivedFile)
-				if err != nil {
-					log.Errorf("Couldn't get file size from archive for verification (corr-id: %s, user: %s, filepath: %s, archivepath: %s, reason: %v)",
-						delivered.CorrelationId, message.User, message.Filepath, archivedFile, err)
 
-					continue
-				}
-
-				log.Infof("Wrote archived file (corr-id: %s, user: %s, filepath: %s, archivepath: %s, archivedsize: %d)",
-					delivered.CorrelationId, message.User, message.Filepath, archivedFile, fileInfo.Size)
+				log.Infof("Wrote archived file (corr-id: %s, user: %s, filepath: %s, archivepath: %s, archivedsize: %d, migrationid: %s)",
+					delivered.CorrelationId, message.User, message.Filepath, archivedFile, fileInfo.Size, migrationResponse.Id)
 
 				status, err := db.GetFileStatus(delivered.CorrelationId)
 				if err != nil {
