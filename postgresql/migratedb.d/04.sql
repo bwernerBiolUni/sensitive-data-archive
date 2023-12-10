@@ -53,6 +53,8 @@ BEGIN
         header               TEXT,
         encryption_method    TEXT,
 
+        migration_id         UUID,
+
         created_by           NAME DEFAULT CURRENT_USER,
         last_modified_by     NAME DEFAULT CURRENT_USER,
         created_at           TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT clock_timestamp(),

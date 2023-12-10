@@ -25,7 +25,7 @@ type Database interface {
 	MarkCompleted(checksum string, fileID int) error
 	MarkReady(accessionID, user, filepath, checksum string) error
 	RegisterFile(filePath, user string) (string, error)
-	SetArchived(file FileInfo, id, corrID string) error
+	SetArchived(file FileInfo, id, corrID string, migrationID string) error
 	UpdateFileStatus(fileUUID, event, corrID, user, message string) error
 	Close()
 }
@@ -325,14 +325,14 @@ func (dbs *SQLdb) storeHeader(header []byte, id string) error {
 }
 
 // SetArchived marks the file as 'ARCHIVED'
-func (dbs *SQLdb) SetArchived(file FileInfo, fileID, corrID string) error {
+func (dbs *SQLdb) SetArchived(file FileInfo, fileID, corrID string, migrationID string) error {
 	var (
 		err   error
 		count int
 	)
 
 	for count == 0 || (err != nil && count < dbRetryTimes) {
-		err = dbs.setArchived(file, fileID, corrID)
+		err = dbs.setArchived(file, fileID, corrID, migrationID)
 		count++
 	}
 
@@ -340,11 +340,11 @@ func (dbs *SQLdb) SetArchived(file FileInfo, fileID, corrID string) error {
 }
 
 // setArchived performs actual work for SetArchived
-func (dbs *SQLdb) setArchived(file FileInfo, fileID, corrID string) error {
+func (dbs *SQLdb) setArchived(file FileInfo, fileID, corrID string, migrationID string) error {
 	dbs.checkAndReconnectIfNeeded()
 
 	db := dbs.DB
-	const query = "SELECT sda.set_archived($1, $2, $3, $4, $5, $6);"
+	const query = "SELECT sda.set_archived($1, $2, $3, $4, $5, $6, $7);"
 	result, err := db.Exec(query,
 		fileID,
 		corrID,
@@ -352,6 +352,7 @@ func (dbs *SQLdb) setArchived(file FileInfo, fileID, corrID string) error {
 		file.Size,
 		fmt.Sprintf("%x", file.Checksum.Sum(nil)),
 		hashType(file.Checksum),
+		migrationID,
 	)
 	if err != nil {
 		return err

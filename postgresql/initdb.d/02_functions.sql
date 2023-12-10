@@ -44,10 +44,10 @@ BEGIN
 END;
 $register_file$ LANGUAGE plpgsql;
 
-CREATE FUNCTION set_archived(file_uuid UUID, corr_id UUID, file_path TEXT, file_size BIGINT, inbox_checksum_value TEXT, inbox_checksum_type TEXT)
+CREATE FUNCTION set_archived(file_uuid UUID, corr_id UUID, file_path TEXT, file_size BIGINT, inbox_checksum_value TEXT, inbox_checksum_type TEXT, migration_uuid UUID)
 RETURNS void AS $set_archived$
 BEGIN
-    UPDATE sda.files SET archive_file_path = file_path, archive_file_size = file_size WHERE id = file_uuid;
+    UPDATE sda.files SET archive_file_path = file_path, archive_file_size = file_size, migration_id = migration_uuid WHERE id = file_uuid;
 
     INSERT INTO sda.checksums(file_id, checksum, type, source)
     VALUES(file_uuid, inbox_checksum_value, upper(inbox_checksum_type)::sda.checksum_algorithm, upper('UPLOADED')::sda.checksum_source);
