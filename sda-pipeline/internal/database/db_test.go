@@ -348,20 +348,20 @@ func TestSetArchived(t *testing.T) {
 
 	r := sqlTesterHelper(t, func(mock sqlmock.Sqlmock, testDb *SQLdb) error {
 		r := sqlmock.NewResult(0, 1)
-		mock.ExpectExec("SELECT sda.set_archived\\(\\$1, \\$2, \\$3, \\$4, \\$5, \\$6\\);").
-			WithArgs("108b842a-5d8e-4189-8e8a-9f54dc22576e", "108b842a-5d8e-4189-8e8a-9f54dc22576e", file.Path, file.Size, "96fa8f226d3801741e807533552bc4b177ac4544d834073b6a5298934d34b40b", "SHA256").
+		mock.ExpectExec("SELECT sda.set_archived\\(\\$1, \\$2, \\$3, \\$4, \\$5, \\$6, \\$7\\);").
+			WithArgs("108b842a-5d8e-4189-8e8a-9f54dc22576e", "108b842a-5d8e-4189-8e8a-9f54dc22576e", file.Path, file.Size, "96fa8f226d3801741e807533552bc4b177ac4544d834073b6a5298934d34b40b", "SHA256", "d2fd999f-1477-4cb8-8398-41ed79e7355f").
 			WillReturnResult(r)
 
-		return testDb.SetArchived(file, "108b842a-5d8e-4189-8e8a-9f54dc22576e", "108b842a-5d8e-4189-8e8a-9f54dc22576e")
+		return testDb.SetArchived(file, "108b842a-5d8e-4189-8e8a-9f54dc22576e", "108b842a-5d8e-4189-8e8a-9f54dc22576e", "d2fd999f-1477-4cb8-8398-41ed79e7355f")
 	})
 	assert.Nil(t, r, "SetArchived failed unexpectedly")
 
 	r = sqlTesterHelper(t, func(mock sqlmock.Sqlmock, testDb *SQLdb) error {
-		mock.ExpectExec("SELECT sda.set_archived\\(\\$1, \\$2, \\$3, \\$4, \\$5, \\$6\\);").
-			WithArgs("108b842a-5d8e-4189-8e8a-9f54dc22576e", "108b842a-5d8e-4189-8e8a-9f54dc22576e", file.Path, file.Size, "96fa8f226d3801741e807533552bc4b177ac4544d834073b6a5298934d34b40b", "SHA256").
+		mock.ExpectExec("SELECT sda.set_archived\\(\\$1, \\$2, \\$3, \\$4, \\$5, \\$6, \\$7\\);").
+			WithArgs("108b842a-5d8e-4189-8e8a-9f54dc22576e", "108b842a-5d8e-4189-8e8a-9f54dc22576e", file.Path, file.Size, "96fa8f226d3801741e807533552bc4b177ac4544d834073b6a5298934d34b40b", "SHA256", "d2fd999f-1477-4cb8-8398-41ed79e7355f").
 			WillReturnError(fmt.Errorf("error for testing"))
 
-		return testDb.SetArchived(file, "108b842a-5d8e-4189-8e8a-9f54dc22576e", "108b842a-5d8e-4189-8e8a-9f54dc22576e")
+		return testDb.SetArchived(file, "108b842a-5d8e-4189-8e8a-9f54dc22576e", "108b842a-5d8e-4189-8e8a-9f54dc22576e", "d2fd999f-1477-4cb8-8398-41ed79e7355f")
 	})
 	assert.NotNil(t, r, "SetArchived did not fail correctly")
 }

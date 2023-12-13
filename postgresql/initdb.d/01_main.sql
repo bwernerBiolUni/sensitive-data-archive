@@ -53,6 +53,8 @@ CREATE TABLE files (
     header               TEXT,
     encryption_method    TEXT,
 
+    migration_id         UUID,
+
     -- Table Audit / Logs
     created_by           NAME DEFAULT CURRENT_USER, -- Postgres users
     last_modified_by     NAME DEFAULT CURRENT_USER, --

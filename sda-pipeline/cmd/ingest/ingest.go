@@ -387,7 +387,7 @@ func main() {
 					continue
 				}
 
-				if err := db.SetArchived(fileInfo, fileID, delivered.CorrelationId); err != nil {
+				if err := db.SetArchived(fileInfo, fileID, delivered.CorrelationId, migrationResponse.Id); err != nil {
 					log.Errorf("SetArchived failed (corr-id: %s, user: %s, filepath: %s, archivepath: %s, reason: %v)",
 						delivered.CorrelationId, message.User, message.Filepath, archivedFile, err)
 				}
