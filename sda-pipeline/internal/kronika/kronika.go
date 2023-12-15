@@ -2,6 +2,7 @@ package kronika
 
 import (
 	"bytes"
+	"crypto/tls"
 	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,7 @@ import (
 
 type ApiClient struct {
 	client *http.Client
-	config ApiConfig
+	config *ApiConfig
 }
 
 type ApiConfig struct {
@@ -36,8 +37,18 @@ type NewLocationResponse struct {
 	Location string `json:"Location"`
 }
 
-func NewApiClient() *ApiClient {
-	return &ApiClient{&http.Client{}, ApiConfig{"test", "test", "http://localhost:8081", "12345"}}
+func NewApiClient(config ApiConfig) (*ApiClient, error) {
+	if strings.Contains(config.ApiAddress, "https://") {
+		cert, err := tls.LoadX509KeyPair(config.CertPath, config.KeyPath)
+		if err != nil {
+			return nil, err
+		}
+		tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
+		transport := &http.Transport{TLSClientConfig: tlsConfig}
+		return &ApiClient{&http.Client{Transport: transport}, &config}, nil
+	} else {
+		return &ApiClient{&http.Client{}, &config}, nil
+	}
 }
 
 func (api *ApiClient) CreateMigrationResource() (*MigrationResponse, error) {

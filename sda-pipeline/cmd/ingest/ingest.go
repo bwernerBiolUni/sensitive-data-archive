@@ -75,7 +75,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	kronikaClient := kronika.NewApiClient()
+	kronikaClient, err := kronika.NewApiClient(conf.Kronika)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	defer mq.Channel.Close()
 	defer mq.Connection.Close()

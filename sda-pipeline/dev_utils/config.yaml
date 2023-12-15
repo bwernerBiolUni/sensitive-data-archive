@@ -3,6 +3,7 @@ api:
   serverCert: "./dev_utils/certs/client.pem"
   serverKey: "./dev_utils/certs/client-key.pem"
 
+#to be removed, replaced by Kronika
 archive:
   type: ""
   # S3 backend
@@ -15,6 +16,12 @@ archive:
   cacert: "./dev_utils/certs/ca.pem"
   # posix backend
   location: "/tmp"
+
+kronika:
+  url: "http://host.docker.internal:8081"
+  certPath: "./dev_utils/certs/client.pem"
+  keyPath: "./dev_utils/certs/client-key.pem"
+  dataSourceId: "123456"
 
 backup:
   type: ""

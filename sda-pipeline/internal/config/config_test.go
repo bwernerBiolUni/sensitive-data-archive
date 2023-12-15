@@ -218,6 +218,10 @@ func (suite *TestSuite) TestConfigS3Storage() {
 	viper.Set("inbox.region", "test")
 	viper.Set("inbox.chunksize", 123)
 	viper.Set("inbox.cacert", "test")
+	viper.Set("kronika.url", "testUrl")
+	viper.Set("kronika.certPath", "testCert")
+	viper.Set("kronika.keyPath", "testKey")
+	viper.Set("kronika.dataSourceId", "testDataSourceId")
 	config, err := NewConfig("ingest")
 	assert.NotNil(suite.T(), config)
 	assert.NoError(suite.T(), err)
@@ -232,17 +236,10 @@ func (suite *TestSuite) TestConfigS3Storage() {
 	assert.Equal(suite.T(), "test", config.Inbox.S3.Region)
 	assert.Equal(suite.T(), 128974848, config.Inbox.S3.Chunksize)
 	assert.Equal(suite.T(), "test", config.Inbox.S3.Cacert)
-	assert.NotNil(suite.T(), config.Archive)
-	assert.NotNil(suite.T(), config.Archive.S3)
-	assert.Equal(suite.T(), S3, config.Archive.Type)
-	assert.Equal(suite.T(), "test", config.Archive.S3.URL)
-	assert.Equal(suite.T(), "test", config.Archive.S3.AccessKey)
-	assert.Equal(suite.T(), "test", config.Archive.S3.SecretKey)
-	assert.Equal(suite.T(), "test", config.Archive.S3.Bucket)
-	assert.Equal(suite.T(), 123, config.Archive.S3.Port)
-	assert.Equal(suite.T(), "test", config.Archive.S3.Region)
-	assert.Equal(suite.T(), 128974848, config.Archive.S3.Chunksize)
-	assert.Equal(suite.T(), "test", config.Archive.S3.Cacert)
+	assert.Equal(suite.T(), "testUrl", config.Kronika.ApiAddress)
+	assert.Equal(suite.T(), "testCert", config.Kronika.CertPath)
+	assert.Equal(suite.T(), "testKey", config.Kronika.KeyPath)
+	assert.Equal(suite.T(), "testDataSourceId", config.Kronika.DataSourceId)
 }
 
 func (suite *TestSuite) TestConfigBackupS3Storage() {
@@ -530,9 +527,7 @@ func (suite *TestSuite) TestIngestConfiguration() {
 	assert.NotNil(suite.T(), config.Inbox)
 	assert.NotNil(suite.T(), config.Inbox.Posix)
 	assert.Equal(suite.T(), "test", config.Inbox.Posix.Location)
-	assert.NotNil(suite.T(), config.Archive)
-	assert.NotNil(suite.T(), config.Archive.Posix)
-	assert.Equal(suite.T(), "test", config.Archive.Posix.Location)
+	assert.NotNil(suite.T(), config.Kronika)
 
 	// Clear variables
 	viper.Reset()
