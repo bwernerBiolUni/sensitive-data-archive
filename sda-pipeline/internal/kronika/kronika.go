@@ -3,12 +3,14 @@ package kronika
 import (
 	"bytes"
 	"crypto/tls"
+	"crypto/x509"
 	b64 "encoding/base64"
 	"encoding/json"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -19,6 +21,7 @@ type ApiClient struct {
 }
 
 type ApiConfig struct {
+	CaCertPath   string
 	CertPath     string
 	KeyPath      string
 	ApiAddress   string
@@ -39,16 +42,62 @@ type NewLocationResponse struct {
 
 func NewApiClient(config ApiConfig) (*ApiClient, error) {
 	if strings.Contains(config.ApiAddress, "https://") {
-		cert, err := tls.LoadX509KeyPair(config.CertPath, config.KeyPath)
+		tlsConfig, err := TLSConfigKronika(config)
 		if err != nil {
 			return nil, err
 		}
-		tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}}
 		transport := &http.Transport{TLSClientConfig: tlsConfig}
 		return &ApiClient{&http.Client{Transport: transport}, &config}, nil
 	} else {
 		return &ApiClient{&http.Client{}, &config}, nil
 	}
+}
+
+func TLSConfigKronika(config ApiConfig) (*tls.Config, error) {
+	// Read system CAs
+	systemCAs, err := x509.SystemCertPool()
+	if err != nil {
+		return nil, err
+	}
+
+	tlsConfig := tls.Config{
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    systemCAs,
+	}
+
+	// Add CAs for kronika
+	for _, cacert := range []string{config.CaCertPath} {
+		if cacert == "" {
+			continue
+		}
+		cacert, err := os.ReadFile(cacert) // #nosec this file comes from our config
+		if err != nil {
+			return nil, err
+		}
+		if ok := tlsConfig.RootCAs.AppendCertsFromPEM(cacert); !ok {
+			log.Warnln("No certs appended, using system certs only")
+		}
+	}
+
+	if config.CertPath != "" && config.KeyPath != "" {
+		cert, err := os.ReadFile(config.CertPath)
+		if err != nil {
+			return nil, err
+		}
+		key, err := os.ReadFile(config.KeyPath)
+		if err != nil {
+			return nil, err
+		}
+		certs, err := tls.X509KeyPair(cert, key)
+		if err != nil {
+			return nil, err
+		}
+		tlsConfig.Certificates = append(tlsConfig.Certificates, certs)
+	} else {
+		log.Fatalf("No certificates supplied")
+	}
+
+	return &tlsConfig, nil
 }
 
 func (api *ApiClient) CreateMigrationResource() (*MigrationResponse, error) {

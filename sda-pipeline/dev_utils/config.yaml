@@ -18,7 +18,8 @@ archive:
   location: "/tmp"
 
 kronika:
-  url: "http://host.docker.internal:8081"
+  url: "https://host.docker.internal:9443"
+  caCertPath: "./dev_utils/certs/ca.pem"
   certPath: "./dev_utils/certs/client.pem"
   keyPath: "./dev_utils/certs/client-key.pem"
   dataSourceId: "123456"

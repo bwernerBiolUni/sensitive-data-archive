@@ -558,6 +558,7 @@ func (c *Config) configKronika() {
 	kronikaConfig := kronika.ApiConfig{}
 
 	kronikaConfig.ApiAddress = viper.GetString("kronika.url")
+	kronikaConfig.CaCertPath = viper.GetString("kronika.caCertPath")
 	kronikaConfig.CertPath = viper.GetString("kronika.certPath")
 	kronikaConfig.KeyPath = viper.GetString("kronika.keyPath")
 	kronikaConfig.DataSourceId = viper.GetString("kronika.dataSourceId")
