@@ -6,6 +6,7 @@ import (
 	"crypto/x509"
 	b64 "encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	log "github.com/sirupsen/logrus"
 	"io"
@@ -41,6 +42,10 @@ type NewLocationResponse struct {
 }
 
 func NewApiClient(config ApiConfig) (*ApiClient, error) {
+	if config.DataSourceId == "" {
+		return nil, errors.New("empty dataSourceId")
+	}
+
 	if strings.Contains(config.ApiAddress, "https://") {
 		tlsConfig, err := TLSConfigKronika(config)
 		if err != nil {
@@ -48,8 +53,10 @@ func NewApiClient(config ApiConfig) (*ApiClient, error) {
 		}
 		transport := &http.Transport{TLSClientConfig: tlsConfig}
 		return &ApiClient{&http.Client{Transport: transport}, &config}, nil
-	} else {
+	} else if strings.Contains(config.ApiAddress, "http://") {
 		return &ApiClient{&http.Client{}, &config}, nil
+	} else {
+		return nil, errors.New("wrong url: " + config.ApiAddress)
 	}
 }
 
