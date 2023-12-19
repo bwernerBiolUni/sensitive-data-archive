@@ -31,6 +31,10 @@ openssl x509 -req -in ./certs/s3.csr -days 1200 -CA ./certs/ca.pem -CAkey ./cert
 openssl req -config "$sslcnf" -new -nodes -newkey rsa:4096 -keyout ./certs/client-key.pem -out ./certs/client.csr -extensions client_cert
 openssl x509 -req -in ./certs/client.csr -days 1200 -CA ./certs/ca.pem -CAkey ./certs/ca-key.pem -set_serial "$serial" -out ./certs/client.pem -extensions client_cert -extfile "$sslcnf"
 
+# Create certificates for kronika-wiremock-docker
+openssl pkcs12 -export -out ./certs/client.jks -inkey ./certs/client-key.pem -in ./certs/client.pem -passout pass:password
+openssl pkcs12 -export -out ./certs/server.jks -inkey ./certs/mq-key.pem -in ./certs/mq.pem -passout pass:password
+
 # Create rsa key-pair for sftp client authentication
 ssh-keygen -t rsa -f ./certs/sftp-key -P "test"
 mv ./certs/sftp-key ./certs/sftp-key.pem

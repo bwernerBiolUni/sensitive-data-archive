@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"sda-pipeline/internal/kronika"
 	"strings"
 	"time"
 
@@ -35,6 +36,7 @@ type Config struct {
 	API          APIConf
 	Notify       SMTPConf
 	Orchestrator OrchestratorConf
+	Kronika      kronika.ApiConfig
 }
 
 type APIConf struct {
@@ -201,7 +203,7 @@ func NewConfig(app string) (*Config, error) {
 		return c, nil
 	case "ingest":
 		c.configInbox()
-		c.configArchive()
+		c.configKronika()
 
 		err = c.configDatabase()
 		if err != nil {
@@ -550,6 +552,18 @@ func (c *Config) configOrchestrator() {
 		c.Orchestrator.QueueAccession = "accessionIDs"
 	}
 
+}
+
+func (c *Config) configKronika() {
+	kronikaConfig := kronika.ApiConfig{}
+
+	kronikaConfig.ApiAddress = viper.GetString("kronika.url")
+	kronikaConfig.CaCertPath = viper.GetString("kronika.caCertPath")
+	kronikaConfig.CertPath = viper.GetString("kronika.certPath")
+	kronikaConfig.KeyPath = viper.GetString("kronika.keyPath")
+	kronikaConfig.DataSourceId = viper.GetString("kronika.dataSourceId")
+
+	c.Kronika = kronikaConfig
 }
 
 // GetC4GHKey reads and decrypts and returns the c4gh key

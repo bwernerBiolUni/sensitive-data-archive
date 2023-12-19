@@ -1,7 +1,7 @@
 # sda-pipeline: ingest
 
 Splits the Crypt4GH header and moves it to database. The remainder of the file
-is sent to the storage backend (archive). No cryptographic tasks are done.
+is sent to the storage backend (Kronik@ API). No cryptographic tasks are done.
 
 ## Configuration
 
@@ -80,28 +80,41 @@ These settings control how ingest connects to the RabbitMQ message broker.
 
 ### Storage settings
 
-Storage backend is defined by the `ARCHIVE_TYPE`, and `INBOX_TYPE` variables.
+Storage backend is defined by the `INBOX_TYPE` variables.
 Valid values for these options are `S3` or `POSIX`
 (Defaults to `POSIX` on unknown values).
 
 The value of these variables define what other variables are read.
-The same variables are available for all storage types, differing by prefix (`ARCHIVE_`, or  `INBOX_`)
 
-if `*_TYPE` is `S3` then the following variables are available:
- - `*_URL`: URL to the S3 system
- - `*_ACCESSKEY`: The S3 access and secret key are used to authenticate to S3,
+if `INBOX_TYPE` is `S3` then the following variables are available:
+ - `INBOX_URL`: URL to the S3 system
+ - `INBOX_ACCESSKEY`: The S3 access and secret key are used to authenticate to S3,
  [more info at AWS](https://docs.aws.amazon.com/general/latest/gr/aws-sec-cred-types.html#access-keys-and-secret-access-keys)
- - `*_SECRETKEY`: The S3 access and secret key are used to authenticate to S3,
+ - `INBOX_SECRETKEY`: The S3 access and secret key are used to authenticate to S3,
  [more info at AWS](https://docs.aws.amazon.com/general/latest/gr/aws-sec-cred-types.html#access-keys-and-secret-access-keys)
- - `*_BUCKET`: The S3 bucket to use as the storage root
- - `*_PORT`: S3 connection port (default: `443`)
- - `*_REGION`: S3 region (default: `us-east-1`)
- - `*_CHUNKSIZE`: S3 chunk size for multipart uploads.
+ - `INBOX_BUCKET`: The S3 bucket to use as the storage root
+ - `INBOX_PORT`: S3 connection port (default: `443`)
+ - `INBOX_REGION`: S3 region (default: `us-east-1`)
+ - `INBOX_CHUNKSIZE`: S3 chunk size for multipart uploads.
 # CA certificate is only needed if the S3 server has a certificate signed by a private entity
- - `*_CACERT`: Certificate Authority (CA) certificate for the storage system
+ - `INBOX_CACERT`: Certificate Authority (CA) certificate for the storage system
 
-and if `*_TYPE` is `POSIX`:
- - `*_LOCATION`: POSIX path to use as storage root
+and if `INBOX_TYPE` is `POSIX`:
+ - `INBOX_LOCATION`: POSIX path to use as storage root
+
+
+### Kronik@ API settings
+
+- `KRONIKA_URL`: the whole URL example: `https://localhost:8080`
+
+- `KRONIKA_CACERTPATH`: Certificate Authority (CA),
+CA certificate is only needed if the server has a certificate signed by a private entity
+
+- `KRONIKA_CERTPATH`: Kronik@ client certificate file
+
+- `KRONIKA_KEYPATH`: key-file for the Kronik@ client certificate
+
+- `KRONIKA_DATASOURCEID`: Identifier of the data source in the Kronik@ system
 
 ### Logging settings:
 
@@ -118,7 +131,7 @@ and if `*_TYPE` is `POSIX`:
     - `panic`
 
 ## Service Description
-The ingest service copies files from the file inbox to the archive, and registers them in the database.
+The ingest service copies files from the file inbox to the Kronik@ API, and registers them in the database.
 
 When running, ingest reads messages from the configured RabbitMQ queue (default: "ingest").
 For each message, these steps are taken (if not otherwise noted, errors halt progress and the service moves on to the next message):
@@ -132,7 +145,7 @@ If the file reader can’t be created an error is written to the logs, the messa
 1. The file size is read from the file reader.
 On error, the error is written to the logs, the message is Nacked and forwarded to the error queue.
 
-1. A uuid is generated, and a file writer is created in the archive using the uuid as filename.
+1. A uuid is generated, and a file writer is created in the Kronik@ API using the uuid as filename.
 On error the error is written to the logs and the message is Nacked and then re-queued.
 
 1. The filename is inserted into the database along with the user id of the uploading user. In case the file is already existing in the database, the status is updated.
@@ -145,10 +158,7 @@ If the decryption fails, an error is written to the error log, the message is Na
 1. The header is written to the database.
 Errors are written to the error log.
 
-1. The header is stripped from the file data, and the remaining file data is written to the archive.
-Errors are written to the error log.
-
-1. The size of the archived file is read.
+1. The header is stripped from the file data, and the remaining file data is written to the Kronik@ API.
 Errors are written to the error log.
 
 1. The database is updated with the file size, archive path, and archive checksum, and the file is set as “archived”.
@@ -165,4 +175,4 @@ This error does not halt ingestion.
 
  - Ingest inserts file information in the database using three database functions, `InsertFile`, `StoreHeader`, and `SetArchived`.
 
- - Ingest reads file data from inbox storage and writes data to archive storage.
+ - Ingest reads file data from inbox storage and sends data to Kronik@ API.
