@@ -215,6 +215,7 @@ func NewConfig(app string) (*Config, error) {
 		return c, nil
 	case "verify":
 		c.configArchive()
+		c.configKronika()
 
 		err = c.configDatabase()
 		if err != nil {
@@ -562,6 +563,8 @@ func (c *Config) configKronika() {
 	kronikaConfig.CertPath = viper.GetString("kronika.certPath")
 	kronikaConfig.KeyPath = viper.GetString("kronika.keyPath")
 	kronikaConfig.DataSourceId = viper.GetString("kronika.dataSourceId")
+	kronikaConfig.StatusCheckDelayInSeconds = viper.GetInt("kronika.migrationStatusCheckDelayInSeconds")
+	kronikaConfig.MaxNoStatusChecks = viper.GetInt("kronika.maxNoMigrationStatusChecks")
 
 	c.Kronika = kronikaConfig
 }

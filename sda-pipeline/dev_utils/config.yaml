@@ -23,6 +23,8 @@ kronika:
   certPath: "./dev_utils/certs/client.pem"
   keyPath: "./dev_utils/certs/client-key.pem"
   dataSourceId: "123456"
+  migrationStatusCheckDelayInSeconds: 30
+  maxNoMigrationStatusChecks: 10
 
 backup:
   type: ""

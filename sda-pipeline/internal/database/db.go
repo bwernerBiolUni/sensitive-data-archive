@@ -196,34 +196,69 @@ func (dbs *SQLdb) GetHeaderForStableID(stableID string) (string, error) {
 }
 
 // MarkCompleted marks the file as "COMPLETED"
-func (dbs *SQLdb) MarkCompleted(file FileInfo, fileID, corrID string) error {
+func (dbs *SQLdb) MarkCompleted(fileID, corrID string) error {
 	var (
 		err   error
 		count int
 	)
 
 	for count == 0 || (err != nil && count < dbRetryTimes) {
-		err = dbs.markCompleted(file, fileID, corrID)
+		err = dbs.markCompleted(fileID, corrID)
 		count++
 	}
 
 	return err
 }
 
-// markCompleted performs actual work for MarkCompleted
-func (dbs *SQLdb) markCompleted(file FileInfo, fileID, corrID string) error {
+// SetDecryptedInfo insert decrypted checksums for file
+func (dbs *SQLdb) SetDecryptedInfo(file FileInfo, fileID string, decryptedMd5 hash.Hash) error {
+	var (
+		err   error
+		count int
+	)
+
+	for count == 0 || (err != nil && count < dbRetryTimes) {
+		err = dbs.setDecryptedInfo(file, fileID, decryptedMd5)
+		count++
+	}
+
+	return err
+}
+
+// setDecryptedInfo performs actual work for SetDecryptedInfo
+func (dbs *SQLdb) setDecryptedInfo(file FileInfo, fileID string, decryptedMd5 hash.Hash) error {
 	dbs.checkAndReconnectIfNeeded()
 
 	db := dbs.DB
-	const completed = "SELECT sda.set_verified($1, $2, $3, $4, $5, $6, $7);"
+	const completed = "SELECT sda.set_decrypted_info($1, $2, $3, $4, $5, $6, $7);"
 	result, err := db.Exec(completed,
 		fileID,
-		corrID,
 		fmt.Sprintf("%x", file.Checksum.Sum(nil)),
 		hashType(file.Checksum),
 		file.DecryptedSize,
 		fmt.Sprintf("%x", file.DecryptedChecksum.Sum(nil)),
 		hashType(file.DecryptedChecksum),
+		fmt.Sprintf("%x", decryptedMd5.Sum(nil)),
+	)
+	if err != nil {
+		return err
+	}
+	if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
+		return errors.New("something went wrong with the query zero rows were changed")
+	}
+
+	return nil
+}
+
+// markCompleted performs actual work for MarkCompleted
+func (dbs *SQLdb) markCompleted(fileID, corrID string) error {
+	dbs.checkAndReconnectIfNeeded()
+
+	db := dbs.DB
+	const completed = "SELECT sda.set_verified($1, $2);"
+	result, err := db.Exec(completed,
+		fileID,
+		corrID,
 	)
 	if err != nil {
 		return err
@@ -362,6 +397,99 @@ func (dbs *SQLdb) setArchived(file FileInfo, fileID, corrID string, migrationID 
 	}
 
 	return nil
+}
+
+// GetMigrationId fetches Kronika migration_id
+func (dbs *SQLdb) GetMigrationId(fileID string) (string, error) {
+	var (
+		err         error
+		count       int
+		migrationID string
+	)
+
+	for count == 0 || (err != nil && count < dbRetryTimes) {
+		migrationID, err = dbs.getMigrationId(fileID)
+		count++
+	}
+
+	return migrationID, err
+}
+
+// getMigrationId performs actual work for GetMigrationId
+func (dbs *SQLdb) getMigrationId(fileID string) (string, error) {
+	dbs.checkAndReconnectIfNeeded()
+	db := dbs.DB
+	const getMigrationID = "SELECT migration_id from sda.files WHERE id = $1;"
+
+	var migrationID string
+	err := db.QueryRow(getMigrationID, fileID).Scan(&migrationID)
+	if err != nil {
+		return "", err
+	}
+
+	return migrationID, nil
+}
+
+// GetDecryptedMd5Checksum fetches MD5 UNENCRYPTED checksum
+func (dbs *SQLdb) GetDecryptedMd5Checksum(fileID string) (string, error) {
+	var (
+		err      error
+		count    int
+		checksum string
+	)
+
+	for count == 0 || (err != nil && count < dbRetryTimes) {
+		checksum, err = dbs.getDecryptedMd5Checksum(fileID)
+		count++
+	}
+
+	return checksum, err
+}
+
+// getDecryptedMd5Checksum performs actual work for GetDecryptedMd5Checksum
+func (dbs *SQLdb) getDecryptedMd5Checksum(fileID string) (string, error) {
+	dbs.checkAndReconnectIfNeeded()
+	db := dbs.DB
+	const getDecryptedMd5Checksum = "SELECT checksum FROM sda.checksums WHERE file_id = $1 AND source = upper('UNENCRYPTED')::sda.checksum_source AND type = upper('MD5')::sda.checksum_algorithm;"
+
+	var checksum string
+	err := db.QueryRow(getDecryptedMd5Checksum, fileID).Scan(&checksum)
+	if err != nil {
+		return "", err
+	}
+
+	return checksum, nil
+}
+
+// GetDecryptedSha256Checksum fetches SHA256 UNENCRYPTED checksum
+func (dbs *SQLdb) GetDecryptedSha256Checksum(fileID string) (string, error) {
+	var (
+		err      error
+		count    int
+		checksum string
+	)
+
+	for count == 0 || (err != nil && count < dbRetryTimes) {
+		checksum, err = dbs.getDecryptedSha256Checksum(fileID)
+		count++
+	}
+
+	return checksum, err
+}
+
+// getDecryptedSha256Checksum performs actual work for GetDecryptedSha256Checksum
+func (dbs *SQLdb) getDecryptedSha256Checksum(fileID string) (string, error) {
+	dbs.checkAndReconnectIfNeeded()
+	db := dbs.DB
+	const getDecryptedSha256Checksum = "SELECT checksum FROM sda.checksums WHERE file_id = $1 AND source = upper('UNENCRYPTED')::sda.checksum_source AND type = upper('SHA256')::sda.checksum_algorithm;"
+
+	var checksum string
+	err := db.QueryRow(getDecryptedSha256Checksum, fileID).Scan(&checksum)
+	if err != nil {
+		return "", err
+	}
+
+	return checksum, nil
 }
 
 // CheckAccessionIdExists validates if an accessionID exists in the db

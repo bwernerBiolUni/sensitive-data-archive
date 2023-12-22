@@ -189,48 +189,26 @@ func sqlTesterHelper(t *testing.T, f func(sqlmock.Sqlmock, *SQLdb) error) error 
 }
 
 func TestMarkCompleted(t *testing.T) {
-	file := FileInfo{sha256.New(), 46, "/somepath", sha256.New(), 48}
-
-	_, err := file.Checksum.Write([]byte("checksum"))
-	if err != nil {
-		return
-	}
-
-	_, err = file.DecryptedChecksum.Write([]byte("decryptedchecksum"))
-	if err != nil {
-		return
-	}
-
 	r := sqlTesterHelper(t, func(mock sqlmock.Sqlmock, testDb *SQLdb) error {
 		r := sqlmock.NewResult(0, 1)
-		mock.ExpectExec("SELECT sda.set_verified\\(\\$1, \\$2, \\$3, \\$4, \\$5, \\$6, \\$7\\);").
+		mock.ExpectExec("SELECT sda.set_verified\\(\\$1, \\$2\\);").
 			WithArgs(
 				"fb140b10-1354-4266-879e-b34ad3e64c57",
 				"71bb2f05-2061-41ac-9f62-32322fde7e7d",
-				"96fa8f226d3801741e807533552bc4b177ac4544d834073b6a5298934d34b40b",
-				"SHA256",
-				file.DecryptedSize,
-				"b353d3058b350466bb75a4e5e2263c73a7b900e2c48804780c6dd820b8b151ba",
-				"SHA256",
 			).WillReturnResult(r)
 
-		return testDb.MarkCompleted(file, "fb140b10-1354-4266-879e-b34ad3e64c57", "71bb2f05-2061-41ac-9f62-32322fde7e7d")
+		return testDb.MarkCompleted("fb140b10-1354-4266-879e-b34ad3e64c57", "71bb2f05-2061-41ac-9f62-32322fde7e7d")
 	})
 	assert.Nil(t, r, "MarkCompleted failed unexpectedly")
 
 	r = sqlTesterHelper(t, func(mock sqlmock.Sqlmock, testDb *SQLdb) error {
-		mock.ExpectExec("SELECT sda.set_verified\\(\\$1, \\$2, \\$3, \\$4, \\$5, \\$6, \\$7\\);").
+		mock.ExpectExec("SELECT sda.set_verified\\(\\$1, \\$2\\);").
 			WithArgs(
 				"fb140b10-1354-4266-879e-b34ad3e64c57",
 				"71bb2f05-2061-41ac-9f62-32322fde7e7d",
-				"96fa8f226d3801741e807533552bc4b177ac4544d834073b6a5298934d34b40b",
-				"SHA256",
-				file.DecryptedSize,
-				"b353d3058b350466bb75a4e5e2263c73a7b900e2c48804780c6dd820b8b151ba",
-				"SHA256",
 			).WillReturnError(fmt.Errorf("error for testing"))
 
-		return testDb.MarkCompleted(file, "fb140b10-1354-4266-879e-b34ad3e64c57", "71bb2f05-2061-41ac-9f62-32322fde7e7d")
+		return testDb.MarkCompleted("fb140b10-1354-4266-879e-b34ad3e64c57", "71bb2f05-2061-41ac-9f62-32322fde7e7d")
 	})
 	assert.NotNil(t, r, "MarkCompleted did not fail as expected")
 }
@@ -588,6 +566,45 @@ func TestGetFileStatus(t *testing.T) {
 	})
 
 	assert.NotNil(t, err, "GetFileStatus did not fail as expected")
+}
+
+func TestGetMigrationId(t *testing.T) {
+	err := sqlTesterHelper(t, func(mock sqlmock.Sqlmock, testDb *SQLdb) error {
+		mock.ExpectQuery("SELECT migration_id from sda.files WHERE id = \\$1;").
+			WithArgs("7559caae-a17c-40ae-bdb9-3a7d33408c49").
+			WillReturnRows(sqlmock.NewRows([]string{"event"}).AddRow("migrationId"))
+
+		_, err := testDb.GetMigrationId("7559caae-a17c-40ae-bdb9-3a7d33408c49")
+
+		return err
+	})
+	assert.Nil(t, err, "GetMigrationId failed unexpectedly")
+}
+
+func TestGetDecryptedSha256Checksum(t *testing.T) {
+	err := sqlTesterHelper(t, func(mock sqlmock.Sqlmock, testDb *SQLdb) error {
+		mock.ExpectQuery("SELECT checksum FROM sda.checksums WHERE file_id = \\$1 AND source = upper\\('UNENCRYPTED'\\)::sda.checksum_source AND type = upper\\('SHA256'\\)::sda.checksum_algorithm;").
+			WithArgs("7559caae-a17c-40ae-bdb9-3a7d33408c49").
+			WillReturnRows(sqlmock.NewRows([]string{"event"}).AddRow("checksum"))
+
+		_, err := testDb.GetDecryptedSha256Checksum("7559caae-a17c-40ae-bdb9-3a7d33408c49")
+
+		return err
+	})
+	assert.Nil(t, err, "GetUnencryptedChecksums failed unexpectedly")
+}
+
+func TestGetDecryptedMd5Checksum(t *testing.T) {
+	err := sqlTesterHelper(t, func(mock sqlmock.Sqlmock, testDb *SQLdb) error {
+		mock.ExpectQuery("SELECT checksum FROM sda.checksums WHERE file_id = \\$1 AND source = upper\\('UNENCRYPTED'\\)::sda.checksum_source AND type = upper\\('MD5'\\)::sda.checksum_algorithm;").
+			WithArgs("7559caae-a17c-40ae-bdb9-3a7d33408c49").
+			WillReturnRows(sqlmock.NewRows([]string{"event"}).AddRow("checksum"))
+
+		_, err := testDb.GetDecryptedMd5Checksum("7559caae-a17c-40ae-bdb9-3a7d33408c49")
+
+		return err
+	})
+	assert.Nil(t, err, "GetUnencryptedChecksums failed unexpectedly")
 }
 
 func TestGetInboxPath(t *testing.T) {
