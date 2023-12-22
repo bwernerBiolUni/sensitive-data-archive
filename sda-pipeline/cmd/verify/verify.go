@@ -3,21 +3,15 @@
 package main
 
 import (
-	"bytes"
-	"crypto/md5" // #nosec
-	"crypto/sha256"
 	"encoding/json"
-	"fmt"
-	"io"
+	log "github.com/sirupsen/logrus"
+	"golang.org/x/exp/slices"
+	"time"
 
 	"sda-pipeline/internal/broker"
 	"sda-pipeline/internal/config"
 	"sda-pipeline/internal/database"
-	"sda-pipeline/internal/storage"
-
-	"github.com/neicnordic/crypt4gh/streaming"
-
-	log "github.com/sirupsen/logrus"
+	"sda-pipeline/internal/kronika"
 )
 
 // Message struct that holds the json message data
@@ -57,11 +51,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	archive, err := storage.NewBackend(conf.Archive)
-	if err != nil {
-		log.Fatal(err)
-	}
-	key, err := config.GetC4GHKey()
+	kronikaClient, err := kronika.NewApiClient(conf.Kronika)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -153,316 +143,165 @@ func main() {
 				continue
 			}
 
-			header, err := db.GetHeader(message.FileID)
+			migrationId, err := db.GetMigrationId(message.FileID)
 			if err != nil {
-				log.Errorf("GetHeader failed "+
-					"(corr-id: %s, user: %s, filepath: %s, fileid: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-					delivered.CorrelationId,
-					message.User,
-					message.FilePath,
-					message.FileID,
-					message.ArchivePath,
-					message.EncryptedChecksums,
-					message.ReVerify,
-					err)
-
-				// Nack message so the server gets notified that something is wrong but don't requeue the message
-				if e := delivered.Nack(false, false); e != nil {
-					log.Errorf("Failed to nack following getheader error message "+
-						"(corr-id: %s, user: %s, filepath: %s, fileid: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-						delivered.CorrelationId,
-						message.User,
-						message.FilePath,
-						message.FileID,
-						message.ArchivePath,
-						message.EncryptedChecksums,
-						message.ReVerify,
-						e)
-
-				}
-				// store full message info in case we want to fix the db entry and retry
-				infoErrorMessage := broker.InfoError{
-					Error:           "Getheader failed",
-					Reason:          err.Error(),
-					OriginalMessage: message,
-				}
-
-				body, _ := json.Marshal(infoErrorMessage)
-
-				// Send the message to an error queue so it can be analyzed.
-				if e := mq.SendMessage(delivered.CorrelationId, conf.Broker.Exchange, conf.Broker.RoutingError, conf.Broker.Durable, body); e != nil {
-					log.Errorf("Failed to publish getheader error message "+
-						"(corr-id: %s, user: %s, filepath: %s, fileid: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-						delivered.CorrelationId,
-						message.User,
-						message.FilePath,
-						message.FileID,
-						message.ArchivePath,
-						message.EncryptedChecksums,
-						message.ReVerify,
-						e)
-				}
-
-				continue
+				log.Errorf("GetMigrationId failed (file-id: %s, corr-id: %s, user: %s, filepath: %s, reason: %v)",
+					message.FileID, delivered.CorrelationId, message.User, message.FilePath, err)
 			}
 
-			var file database.FileInfo
-
-			file.Size, err = archive.GetFileSize(message.ArchivePath)
-
-			if err != nil {
-				log.Errorf("Failed to get archived file size "+
-					"(corr-id: %s, user: %s, filepath: %s, fileid: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-					delivered.CorrelationId,
-					message.User,
-					message.FilePath,
-					message.FileID,
-					message.ArchivePath,
-					message.EncryptedChecksums,
-					message.ReVerify,
-					err)
-
-				continue
-			}
-
-			log.Infof("Got archived file size "+
-				"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, archivedsize: %d)",
-				delivered.CorrelationId,
-				message.User,
-				message.FilePath,
-				message.ArchivePath,
-				message.EncryptedChecksums,
-				message.ReVerify,
-				file.Size)
-
-			archiveFileHash := sha256.New()
-
-			f, err := archive.NewFileReader(message.ArchivePath)
-			if err != nil {
-				log.Errorf("Failed to open archived file "+
-					"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-					delivered.CorrelationId,
-					message.User,
-					message.FilePath,
-					message.ArchivePath,
-					message.EncryptedChecksums,
-					message.ReVerify,
-					err)
-
-				// Send the message to an error queue so it can be analyzed.
-				infoErrorMessage := broker.InfoError{
-					Error:           "Failed to open archived file",
-					Reason:          err.Error(),
-					OriginalMessage: message,
-				}
-
-				body, _ := json.Marshal(infoErrorMessage)
-				if e := mq.SendMessage(delivered.CorrelationId, conf.Broker.Exchange, conf.Broker.RoutingError, conf.Broker.Durable, body); e != nil {
-
-					log.Errorf("Failed to publish file open error message "+
-						"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-						delivered.CorrelationId,
-						message.User,
-						message.FilePath,
-						message.ArchivePath,
-						message.EncryptedChecksums,
-						message.ReVerify,
-						e)
-
-				}
-
-				// Restart on new message
-				continue
-			}
-
-			hr := bytes.NewReader(header)
-			// Feed everything read from the archive file to archiveFileHash
-			mr := io.MultiReader(hr, io.TeeReader(f, archiveFileHash))
-
-			c4ghr, err := streaming.NewCrypt4GHReader(mr, *key, nil)
-			if err != nil {
-				log.Errorf("Failed to open c4gh decryptor stream "+
-					"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-					delivered.CorrelationId,
-					message.User,
-					message.FilePath,
-					message.ArchivePath,
-					message.EncryptedChecksums,
-					message.ReVerify,
-					err)
-
-				continue
-			}
-
-			md5hash := md5.New() // #nosec
-			sha256hash := sha256.New()
-
-			stream := io.TeeReader(c4ghr, md5hash)
-
-			if file.DecryptedSize, err = io.Copy(sha256hash, stream); err != nil {
-				log.Errorf("Failed to copy decrypted data to hash stream "+
-					"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-					delivered.CorrelationId,
-					message.User,
-					message.FilePath,
-					message.ArchivePath,
-					message.EncryptedChecksums,
-					message.ReVerify,
-					err)
-
-				// Send the message to an error queue so it can be analyzed.
-				infoErrorMessage := broker.InfoError{
-					Error:           "Failed to verify archived file",
-					Reason:          err.Error(),
-					OriginalMessage: message,
-				}
-
-				body, _ := json.Marshal(infoErrorMessage)
-				if e := mq.SendMessage(delivered.CorrelationId, conf.Broker.Exchange, conf.Broker.RoutingError, conf.Broker.Durable, body); e != nil {
-					log.Errorf("Failed to publish error message: %v", e)
-				}
-
-				if err := delivered.Ack(false); err != nil {
-					log.Errorf("Failed to ack message: %v", err)
-				}
-
-				continue
-			}
-
-			file.Checksum = archiveFileHash
-			file.DecryptedChecksum = sha256hash
-
-			log.Infof("Calculated decrypted hash "+
-				"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, "+
-				"encryptedchecksums: %v, reverify: %t, decryptedsize: %d, "+
-				"decryptedchecksum: %x)",
-				delivered.CorrelationId,
-				message.User,
-				message.FilePath,
-				message.ArchivePath,
-				message.EncryptedChecksums,
-				message.ReVerify,
-				file.DecryptedSize,
-				file.DecryptedChecksum.Sum(nil))
-
-			//nolint:nestif
-			if !message.ReVerify {
-
-				c := verified{
-					User:     message.User,
-					FilePath: message.FilePath,
-					DecryptedChecksums: []checksums{
-						{"sha256", fmt.Sprintf("%x", sha256hash.Sum(nil))},
-						{"md5", fmt.Sprintf("%x", md5hash.Sum(nil))},
-					},
-				}
-
-				verifiedMessage, _ := json.Marshal(&c)
-
-				err = mq.ValidateJSON(&delivered,
-					"ingestion-accession-request",
-					verifiedMessage,
-					new(verified))
-
+			var migrationStatusResponse *kronika.MigrationStatusResponse
+			for i := 0; i < conf.Kronika.MaxNoStatusChecks; i++ {
+				migrationStatusResponse, err = kronikaClient.GetMigrationStatus(migrationId)
 				if err != nil {
-					log.Errorf("Validation (ingestion-accession-request) of outgoing message failed "+
-						"(corr-id: %s, error: %v, message: %s)",
-						delivered.CorrelationId,
-						err,
-						verifiedMessage)
+					log.Errorf("Failed to check Kronika migration status (corr-id: %s, user: %s, filepath: %s, migrationid: %s, reason: %v)",
+						delivered.CorrelationId, message.User, message.FilePath, migrationId, err)
 
-					// Logging is in ValidateJSON so just restart on new message
-					continue
-				}
-				status, err := db.GetFileStatus(delivered.CorrelationId)
-				if err != nil {
-					log.Errorf("failed to get file status, reason: %v", err.Error())
-					// Send the message to an error queue so it can be analyzed.
+					// Send the message to an error queue, so it can be analyzed.
 					infoErrorMessage := broker.InfoError{
-						Error:           "Getheader failed",
+						Error:           "Failed to check Kronika migration status",
 						Reason:          err.Error(),
 						OriginalMessage: message,
 					}
 
 					body, _ := json.Marshal(infoErrorMessage)
 					if e := mq.SendMessage(delivered.CorrelationId, conf.Broker.Exchange, conf.Broker.RoutingError, conf.Broker.Durable, body); e != nil {
-						log.Errorf("failed so publish message, reason: %v", err)
+						log.Errorf("Failed to publish error message "+
+							"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
+							delivered.CorrelationId,
+							message.User,
+							message.FilePath,
+							message.ArchivePath,
+							message.EncryptedChecksums,
+							message.ReVerify,
+							e)
 					}
-
-					if err := delivered.Ack(false); err != nil {
-						log.Errorf("Failed acking canceled work, reason: %v", err)
-					}
-
-					continue
-				}
-				if status == "disabled" {
-					log.Infof("file with correlation ID: %s is disabled, stopping verification", delivered.CorrelationId)
-					if err := delivered.Ack(false); err != nil {
-						log.Errorf("Failed acking canceled work, reason: %v", err)
-					}
-
 					continue
 				}
 
-				// Mark file as "COMPLETED"
-				if e := db.MarkCompleted(file, message.FileID, delivered.CorrelationId); e != nil {
-					log.Errorf("MarkCompleted failed "+
-						"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
+				if !slices.Contains(kronika.PendingMigrationStatuses, migrationStatusResponse.Status) {
+					break
+				}
+
+				time.Sleep(time.Duration(conf.Kronika.StatusCheckDelayInSeconds) * time.Second)
+			}
+
+			if !slices.Contains(kronika.ErrorMigrationStatuses, migrationStatusResponse.Status) {
+				log.Errorf("Migration ended with error status: %s "+
+					"(corr-id: %s, user: %s, filepath: %s, fileid: %s, migrationId: %s, encryptedchecksums: %v, reverify: %t)",
+					migrationStatusResponse.Status,
+					delivered.CorrelationId,
+					message.User,
+					message.FilePath,
+					message.FileID,
+					migrationId,
+					message.EncryptedChecksums,
+					message.ReVerify)
+
+				if e := delivered.Nack(false, false); e != nil {
+					log.Errorf("Failed to nack message "+
+						"(corr-id: %s, user: %s, filepath: %s, fileid: %s, migrationid: %s, migrationStatus: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
 						delivered.CorrelationId,
 						message.User,
 						message.FilePath,
-						message.ArchivePath,
+						message.FileID,
+						migrationId,
+						migrationStatusResponse.Status,
 						message.EncryptedChecksums,
 						message.ReVerify,
 						e)
-
-					continue
-					// this should really be hadled by the DB retry mechanism
 				}
+				continue
+			}
 
-				log.Infof("File marked completed "+
-					"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, decryptedchecksum: %x)",
+			if e := db.MarkCompleted(message.FileID, delivered.CorrelationId); e != nil {
+				log.Errorf("MarkCompleted failed "+
+					"(corr-id: %s, user: %s, filepath: %s, migrationId: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
+					delivered.CorrelationId,
+					message.User,
+					message.FilePath,
+					migrationId,
+					message.EncryptedChecksums,
+					message.ReVerify,
+					e)
+
+				continue
+				// this should really be handled by the DB retry mechanism
+			}
+
+			log.Infof("File marked completed "+
+				"(corr-id: %s, user: %s, filepath: %s, migrationId: %s, encryptedchecksums: %v, reverify: %t)",
+				delivered.CorrelationId,
+				message.User,
+				message.FilePath,
+				migrationId,
+				message.EncryptedChecksums,
+				message.ReVerify)
+
+			// Send message to verified queue
+
+			decryptedChecksum, err := db.GetDecryptedChecksum(message.FileID)
+			if err != nil {
+				log.Errorf("GetDecryptedChecksum failed (file-id: %s, corr-id: %s, user: %s, filepath: %s, reason: %v)",
+					message.FileID, delivered.CorrelationId, message.User, message.FilePath, err)
+			}
+			c := verified{
+				User:     message.User,
+				FilePath: message.FilePath,
+				DecryptedChecksums: []checksums{
+					{"sha256", decryptedChecksum},
+					//{"sha256", fmt.Sprintf("%x", sha256hash.Sum(nil))},
+					//	{"md5", fmt.Sprintf("%x", md5hash.Sum(nil))},
+				},
+			}
+
+			verifiedMessage, _ := json.Marshal(&c)
+
+			err = mq.ValidateJSON(&delivered,
+				"ingestion-accession-request",
+				verifiedMessage,
+				new(verified))
+
+			if err != nil {
+				log.Errorf("Validation (ingestion-accession-request) of outgoing message failed "+
+					"(corr-id: %s, error: %v, message: %s)",
+					delivered.CorrelationId,
+					err,
+					verifiedMessage)
+
+				// Logging is in ValidateJSON so just restart on new message
+				continue
+			}
+
+			if err := mq.SendMessage(delivered.CorrelationId,
+				conf.Broker.Exchange,
+				conf.Broker.RoutingKey,
+				conf.Broker.Durable,
+				verifiedMessage); err != nil {
+				// TODO fix resend mechanism
+
+				log.Errorf("Sending of message failed "+
+					"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
 					delivered.CorrelationId,
 					message.User,
 					message.FilePath,
 					message.ArchivePath,
 					message.EncryptedChecksums,
 					message.ReVerify,
-					file.DecryptedChecksum.Sum(nil))
+					err)
 
-				// Send message to verified queue
+				continue
+			}
 
-				if err := mq.SendMessage(delivered.CorrelationId,
-					conf.Broker.Exchange,
-					conf.Broker.RoutingKey,
-					conf.Broker.Durable,
-					verifiedMessage); err != nil {
-					// TODO fix resend mechanism
-
-					log.Errorf("Sending of message failed "+
-						"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-						delivered.CorrelationId,
-						message.User,
-						message.FilePath,
-						message.ArchivePath,
-						message.EncryptedChecksums,
-						message.ReVerify,
-						err)
-
-					continue
-				}
-
-				if err := delivered.Ack(false); err != nil {
-					log.Errorf("Failed acking completed work"+
-						"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
-						delivered.CorrelationId,
-						message.User,
-						message.FilePath,
-						message.ArchivePath,
-						message.EncryptedChecksums,
-						message.ReVerify,
-						err)
-				}
+			if err := delivered.Ack(false); err != nil {
+				log.Errorf("Failed acking completed work"+
+					"(corr-id: %s, user: %s, filepath: %s, archivepath: %s, encryptedchecksums: %v, reverify: %t, reason: %v)",
+					delivered.CorrelationId,
+					message.User,
+					message.FilePath,
+					message.ArchivePath,
+					message.EncryptedChecksums,
+					message.ReVerify,
+					err)
 			}
 		}
 	}()

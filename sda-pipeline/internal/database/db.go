@@ -196,14 +196,14 @@ func (dbs *SQLdb) GetHeaderForStableID(stableID string) (string, error) {
 }
 
 // MarkCompleted marks the file as "COMPLETED"
-func (dbs *SQLdb) MarkCompleted(file FileInfo, fileID, corrID string) error {
+func (dbs *SQLdb) MarkCompleted(fileID, corrID string) error {
 	var (
 		err   error
 		count int
 	)
 
 	for count == 0 || (err != nil && count < dbRetryTimes) {
-		err = dbs.markCompleted(file, fileID, corrID)
+		err = dbs.markCompleted(fileID, corrID)
 		count++
 	}
 
@@ -211,19 +211,14 @@ func (dbs *SQLdb) MarkCompleted(file FileInfo, fileID, corrID string) error {
 }
 
 // markCompleted performs actual work for MarkCompleted
-func (dbs *SQLdb) markCompleted(file FileInfo, fileID, corrID string) error {
+func (dbs *SQLdb) markCompleted(fileID, corrID string) error {
 	dbs.checkAndReconnectIfNeeded()
 
 	db := dbs.DB
-	const completed = "SELECT sda.set_verified($1, $2, $3, $4, $5, $6, $7);"
+	const completed = "SELECT sda.set_verified($1, $2);"
 	result, err := db.Exec(completed,
 		fileID,
 		corrID,
-		fmt.Sprintf("%x", file.Checksum.Sum(nil)),
-		hashType(file.Checksum),
-		file.DecryptedSize,
-		fmt.Sprintf("%x", file.DecryptedChecksum.Sum(nil)),
-		hashType(file.DecryptedChecksum),
 	)
 	if err != nil {
 		return err
@@ -362,6 +357,68 @@ func (dbs *SQLdb) setArchived(file FileInfo, fileID, corrID string, migrationID 
 	}
 
 	return nil
+}
+
+// GetMigrationId fetches Kronika migration_id
+func (dbs *SQLdb) GetMigrationId(fileID string) (string, error) {
+	var (
+		err         error
+		count       int
+		migrationID string
+	)
+
+	for count == 0 || (err != nil && count < dbRetryTimes) {
+		migrationID, err = dbs.getMigrationId(fileID)
+		count++
+	}
+
+	return migrationID, err
+}
+
+// getMigrationId performs actual work for GetMigrationId
+func (dbs *SQLdb) getMigrationId(fileID string) (string, error) {
+	dbs.checkAndReconnectIfNeeded()
+	db := dbs.DB
+	const getMigrationID = "SELECT migration_id from sda.files WHERE id = $1;"
+
+	var migrationID string
+	err := db.QueryRow(getMigrationID, fileID).Scan(&migrationID)
+	if err != nil {
+		return "", err
+	}
+
+	return migrationID, nil
+}
+
+// GetDecryptedChecksum fetches UNENCRYPTED checksum
+func (dbs *SQLdb) GetDecryptedChecksum(fileID string) (string, error) {
+	var (
+		err      error
+		count    int
+		checksum string
+	)
+
+	for count == 0 || (err != nil && count < dbRetryTimes) {
+		checksum, err = dbs.getDecryptedChecksum(fileID)
+		count++
+	}
+
+	return checksum, err
+}
+
+// getDecryptedChecksum performs actual work for GetDecryptedChecksum
+func (dbs *SQLdb) getDecryptedChecksum(fileID string) (string, error) {
+	dbs.checkAndReconnectIfNeeded()
+	db := dbs.DB
+	const getDecryptedChecksum = "SELECT checksum FROM sda.checksums WHERE file_id = $1 AND source = upper('UNENCRYPTED')::sda.checksum_source;"
+
+	var checksum string
+	err := db.QueryRow(getDecryptedChecksum, fileID).Scan(&checksum)
+	if err != nil {
+		return "", err
+	}
+
+	return checksum, nil
 }
 
 // CheckAccessionIdExists validates if an accessionID exists in the db

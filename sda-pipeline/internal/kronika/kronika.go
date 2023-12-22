@@ -22,17 +22,20 @@ type ApiClient struct {
 }
 
 type ApiConfig struct {
-	CaCertPath   string
-	CertPath     string
-	KeyPath      string
-	ApiAddress   string
-	DataSourceId string
+	CaCertPath                string
+	CertPath                  string
+	KeyPath                   string
+	ApiAddress                string
+	DataSourceId              string
+	StatusCheckDelayInSeconds int
+	MaxNoStatusChecks         int
 }
 
 type ApiResponse struct {
 	header *http.Header
 	body   []byte
 }
+
 type MigrationResponse struct {
 	Id string `json:"migration_id"`
 }
@@ -40,6 +43,34 @@ type MigrationResponse struct {
 type NewLocationResponse struct {
 	Location string `json:"Location"`
 }
+
+type MigrationStatus string
+
+const (
+	WaitingForStart       MigrationStatus = "0"
+	UploadInProgress      MigrationStatus = "1"
+	ExtractionInProgress  MigrationStatus = "2"
+	StoppedByUser         MigrationStatus = "3"
+	StoppedByError        MigrationStatus = "4"
+	EndedWithError        MigrationStatus = "5"
+	Ended                 MigrationStatus = "6"
+	ErrorOccurred         MigrationStatus = "7"
+	BackupMigrationStatus MigrationStatus = "8"
+	NotStartedByError     MigrationStatus = "9"
+)
+
+type MigrationStatusResponse struct {
+	Id             string          `json:"migration_id"`
+	DataSourceName string          `json:"datasource_name"` // most likely not needed
+	Status         MigrationStatus `json:"migration_status"`
+	StartTime      string          `json:"migration_start_time"` // most likely not needed
+}
+
+// PendingMigrationStatuses is meant to be constant!
+var PendingMigrationStatuses = []MigrationStatus{WaitingForStart, UploadInProgress, ExtractionInProgress}
+
+// ErrorMigrationStatuses is meant to be constant!
+var ErrorMigrationStatuses = []MigrationStatus{StoppedByError, EndedWithError, ErrorOccurred, NotStartedByError}
 
 func NewApiClient(config ApiConfig) (*ApiClient, error) {
 	if config.DataSourceId == "" {
@@ -191,6 +222,25 @@ func (api *ApiClient) StartMigration(input *MigrationResponse) (*ApiResponse, er
 	}
 
 	return api.performHttpRequest(req)
+}
+
+func (api *ApiClient) GetMigrationStatus(migrationId string) (*MigrationStatusResponse, error) {
+	path := fmt.Sprintf("%s/ingest/migrations/%s", api.config.ApiAddress, migrationId)
+	req, err := http.NewRequest("GET", path, nil)
+	req.Header.Set("Content-Type", "application/json")
+
+	var response MigrationStatusResponse
+	result, err := api.performHttpRequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	err = json.Unmarshal(result.body, &response)
+	if err != nil {
+		return nil, err
+	}
+
+	return &response, nil
 }
 
 func (api *ApiClient) performHttpRequest(req *http.Request) (*ApiResponse, error) {
