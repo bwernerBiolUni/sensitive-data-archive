@@ -581,17 +581,30 @@ func TestGetMigrationId(t *testing.T) {
 	assert.Nil(t, err, "GetMigrationId failed unexpectedly")
 }
 
-func TestGetDecryptedChecksum(t *testing.T) {
+func TestGetDecryptedSha256Checksum(t *testing.T) {
 	err := sqlTesterHelper(t, func(mock sqlmock.Sqlmock, testDb *SQLdb) error {
-		mock.ExpectQuery("SELECT checksum FROM sda.checksums WHERE file_id = \\$1 AND source = upper\\('UNENCRYPTED'\\)::sda.checksum_source").
+		mock.ExpectQuery("SELECT checksum FROM sda.checksums WHERE file_id = \\$1 AND source = upper\\('UNENCRYPTED'\\)::sda.checksum_source AND type = upper\\('SHA256'\\)::sda.checksum_algorithm;").
 			WithArgs("7559caae-a17c-40ae-bdb9-3a7d33408c49").
 			WillReturnRows(sqlmock.NewRows([]string{"event"}).AddRow("checksum"))
 
-		_, err := testDb.GetDecryptedChecksum("7559caae-a17c-40ae-bdb9-3a7d33408c49")
+		_, err := testDb.GetDecryptedSha256Checksum("7559caae-a17c-40ae-bdb9-3a7d33408c49")
 
 		return err
 	})
-	assert.Nil(t, err, "GetUnencryptedChecksum failed unexpectedly")
+	assert.Nil(t, err, "GetUnencryptedChecksums failed unexpectedly")
+}
+
+func TestGetDecryptedMd5Checksum(t *testing.T) {
+	err := sqlTesterHelper(t, func(mock sqlmock.Sqlmock, testDb *SQLdb) error {
+		mock.ExpectQuery("SELECT checksum FROM sda.checksums WHERE file_id = \\$1 AND source = upper\\('UNENCRYPTED'\\)::sda.checksum_source AND type = upper\\('MD5'\\)::sda.checksum_algorithm;").
+			WithArgs("7559caae-a17c-40ae-bdb9-3a7d33408c49").
+			WillReturnRows(sqlmock.NewRows([]string{"event"}).AddRow("checksum"))
+
+		_, err := testDb.GetDecryptedMd5Checksum("7559caae-a17c-40ae-bdb9-3a7d33408c49")
+
+		return err
+	})
+	assert.Nil(t, err, "GetUnencryptedChecksums failed unexpectedly")
 }
 
 func TestGetInboxPath(t *testing.T) {

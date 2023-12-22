@@ -239,18 +239,23 @@ func main() {
 
 			// Send message to verified queue
 
-			decryptedChecksum, err := db.GetDecryptedChecksum(message.FileID)
+			decryptedSha256Checksum, err := db.GetDecryptedSha256Checksum(message.FileID)
 			if err != nil {
-				log.Errorf("GetDecryptedChecksum failed (file-id: %s, corr-id: %s, user: %s, filepath: %s, reason: %v)",
+				log.Errorf("GetDecryptedSha256Checksum failed (file-id: %s, corr-id: %s, user: %s, filepath: %s, reason: %v)",
 					message.FileID, delivered.CorrelationId, message.User, message.FilePath, err)
 			}
+			decryptedMd5Checksum, err := db.GetDecryptedMd5Checksum(message.FileID)
+			if err != nil {
+				log.Errorf("GetDecryptedMd5Checksum failed (file-id: %s, corr-id: %s, user: %s, filepath: %s, reason: %v)",
+					message.FileID, delivered.CorrelationId, message.User, message.FilePath, err)
+			}
+
 			c := verified{
 				User:     message.User,
 				FilePath: message.FilePath,
 				DecryptedChecksums: []checksums{
-					{"sha256", decryptedChecksum},
-					//{"sha256", fmt.Sprintf("%x", sha256hash.Sum(nil))},
-					//	{"md5", fmt.Sprintf("%x", md5hash.Sum(nil))},
+					{"sha256", decryptedSha256Checksum},
+					{"md5", decryptedMd5Checksum},
 				},
 			}
 

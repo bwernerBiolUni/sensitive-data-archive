@@ -390,8 +390,8 @@ func (dbs *SQLdb) getMigrationId(fileID string) (string, error) {
 	return migrationID, nil
 }
 
-// GetDecryptedChecksum fetches UNENCRYPTED checksum
-func (dbs *SQLdb) GetDecryptedChecksum(fileID string) (string, error) {
+// GetDecryptedMd5Checksum fetches MD5 UNENCRYPTED checksum
+func (dbs *SQLdb) GetDecryptedMd5Checksum(fileID string) (string, error) {
 	var (
 		err      error
 		count    int
@@ -399,21 +399,52 @@ func (dbs *SQLdb) GetDecryptedChecksum(fileID string) (string, error) {
 	)
 
 	for count == 0 || (err != nil && count < dbRetryTimes) {
-		checksum, err = dbs.getDecryptedChecksum(fileID)
+		checksum, err = dbs.getDecryptedMd5Checksum(fileID)
 		count++
 	}
 
 	return checksum, err
 }
 
-// getDecryptedChecksum performs actual work for GetDecryptedChecksum
-func (dbs *SQLdb) getDecryptedChecksum(fileID string) (string, error) {
+// getDecryptedMd5Checksum performs actual work for GetDecryptedMd5Checksum
+func (dbs *SQLdb) getDecryptedMd5Checksum(fileID string) (string, error) {
 	dbs.checkAndReconnectIfNeeded()
 	db := dbs.DB
-	const getDecryptedChecksum = "SELECT checksum FROM sda.checksums WHERE file_id = $1 AND source = upper('UNENCRYPTED')::sda.checksum_source;"
+	const getDecryptedMd5Checksum = "SELECT checksum FROM sda.checksums WHERE file_id = $1 AND source = upper('UNENCRYPTED')::sda.checksum_source AND type = upper('MD5')::sda.checksum_algorithm;"
 
 	var checksum string
-	err := db.QueryRow(getDecryptedChecksum, fileID).Scan(&checksum)
+	err := db.QueryRow(getDecryptedMd5Checksum, fileID).Scan(&checksum)
+	if err != nil {
+		return "", err
+	}
+
+	return checksum, nil
+}
+
+// GetDecryptedSha256Checksum fetches SHA256 UNENCRYPTED checksum
+func (dbs *SQLdb) GetDecryptedSha256Checksum(fileID string) (string, error) {
+	var (
+		err      error
+		count    int
+		checksum string
+	)
+
+	for count == 0 || (err != nil && count < dbRetryTimes) {
+		checksum, err = dbs.getDecryptedSha256Checksum(fileID)
+		count++
+	}
+
+	return checksum, err
+}
+
+// getDecryptedSha256Checksum performs actual work for GetDecryptedSha256Checksum
+func (dbs *SQLdb) getDecryptedSha256Checksum(fileID string) (string, error) {
+	dbs.checkAndReconnectIfNeeded()
+	db := dbs.DB
+	const getDecryptedSha256Checksum = "SELECT checksum FROM sda.checksums WHERE file_id = $1 AND source = upper('UNENCRYPTED')::sda.checksum_source AND type = upper('SHA256')::sda.checksum_algorithm;"
+
+	var checksum string
+	err := db.QueryRow(getDecryptedSha256Checksum, fileID).Scan(&checksum)
 	if err != nil {
 		return "", err
 	}
