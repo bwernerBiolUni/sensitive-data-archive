@@ -5,16 +5,17 @@ package main
 
 import (
 	"bytes"
+	"crypto/md5"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
-
 	"sda-pipeline/internal/broker"
 	"sda-pipeline/internal/config"
 	"sda-pipeline/internal/database"
 	"sda-pipeline/internal/kronika"
 	"sda-pipeline/internal/storage"
+	"sync"
 
 	"github.com/google/uuid"
 	"github.com/neicnordic/crypt4gh/model/headers"
@@ -223,19 +224,13 @@ func main() {
 				// Create a random uuid as file name
 				archivedFile := uuid.New().String()
 
-				// Add new file to Kronika migration
-				newLocation, err := kronikaClient.CreateTemporaryLocationForFiles(migrationResponse, archivedFile, fileSize)
-				if err != nil {
-					log.Errorf("Add file to migration fail: %s", err)
-					if e := delivered.Nack(false, true); e != nil {
-						log.Errorf("Failed to Nack message (failed get file size) (corr-id: %s, user: %s, filepath: %s, reason: %v)",
-							delivered.CorrelationId, message.User, message.Filepath, e)
-					}
+				var newLocation *kronika.NewLocationResponse
+				uploadOffset := int64(0)
 
-					// Restart on new message
-					continue
-				}
-				log.Infof("New location (%s) defined in migration: %s", newLocation.Location, migrationResponse.Id)
+				pipeReader, pipeWriter := io.Pipe()
+				md5hash := md5.New()
+				sha256hash := sha256.New()
+				var decryptionWait sync.WaitGroup
 
 				if err != nil {
 					log.Errorf("Failed to create archive file (corr-id: %s, user: %s, filepath: %s, archivepath: %s, reason: %v)",
@@ -341,6 +336,44 @@ func main() {
 							continue mainWorkLoop
 						}
 
+						// Add new file to Kronika migration
+						newLocation, err = kronikaClient.CreateTemporaryLocationForFiles(migrationResponse, archivedFile, fileSize, int64(len(header)))
+						if err != nil {
+							log.Errorf("Add file to migration fail: %s", err)
+							if e := delivered.Nack(false, true); e != nil {
+								log.Errorf("Failed to Nack message (failed get file size) (corr-id: %s, user: %s, filepath: %s, reason: %v)",
+									delivered.CorrelationId, message.User, message.Filepath, e)
+							}
+
+							// Restart on new message
+							continue
+						}
+						log.Infof("New location (%s) defined in migration: %s", newLocation.Location, migrationResponse.Id)
+
+						cryptReader, err := streaming.NewCrypt4GHReader(io.MultiReader(bytes.NewReader(h), pipeReader), *key, nil)
+						stream := io.TeeReader(cryptReader, md5hash)
+
+						go func() {
+							decryptionWait.Add(1)
+							size, _ := io.Copy(sha256hash, stream)
+							log.Infof("Decrypted file: %s, decrypted size: %d, md5: %x, sha: %x", fileID, size, md5hash.Sum(nil), sha256hash.Sum(nil))
+
+							decryptedFileInfo := database.FileInfo{}
+							decryptedFileInfo.Path = archivedFile
+							decryptedFileInfo.Checksum = hash
+							decryptedFileInfo.DecryptedChecksum = sha256hash
+							decryptedFileInfo.DecryptedSize = size
+
+							if err := db.SetDecryptedInfo(decryptedFileInfo, fileID, md5hash); err != nil {
+								log.Errorf("SetDecryptedInfo failed (corr-id: %s, user: %s, filepath: %s, archivepath: %s, reason: %v)",
+									delivered.CorrelationId, message.User, message.Filepath, archivedFile, err)
+							} else {
+								log.Infof("Inserted checksums (fileId: %s, decrypted_sha256: %x, decrypted_size: %d)",
+									fileID, sha256hash.Sum(nil), size)
+							}
+							decryptionWait.Done()
+						}()
+
 					} else {
 						if i < len(readBuffer) {
 							readBuffer = readBuffer[:i]
@@ -353,13 +386,17 @@ func main() {
 						}
 					}
 
-					_, err = kronikaClient.UploadDataToLocation(readBuffer, newLocation.Location, migrationResponse.Id, bytesRead, bufSize)
+					kronikaReader := bytes.NewReader(byteBuf.Bytes())
+					_, err = kronikaClient.UploadDataToLocation(
+						io.TeeReader(kronikaReader, pipeWriter), newLocation.Location, migrationResponse.Id, uploadOffset)
 					if err != nil {
 						log.Errorf("Failed to send file to Kronika (corr-id: %s, user: %s, filepath: %s, archivepath: %s, migrationid: %s, reason: %v)",
 							delivered.CorrelationId, message.User, message.Filepath, archivedFile, migrationResponse.Id, err)
 
 						continue mainWorkLoop
 					}
+					uploadOffset += int64(len(byteBuf.Bytes()))
+					byteBuf.Reset()
 				}
 
 				file.Close()
@@ -397,6 +434,10 @@ func main() {
 
 				log.Infof("File marked as archived (corr-id: %s, user: %s, filepath: %s, archivepath: %s)",
 					delivered.CorrelationId, message.User, message.Filepath, archivedFile)
+
+				// save checksums to DB
+				pipeWriter.Close()
+				decryptionWait.Wait()
 
 				// Send message to archived
 				msg := archived{

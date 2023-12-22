@@ -163,7 +163,7 @@ func (api *ApiClient) CreateMigrationResource() (*MigrationResponse, error) {
 	return &response, nil
 }
 
-func (api *ApiClient) CreateTemporaryLocationForFiles(input *MigrationResponse, fileName string, contentLength int64) (*NewLocationResponse, error) {
+func (api *ApiClient) CreateTemporaryLocationForFiles(input *MigrationResponse, fileName string, contentLength int64, headerSize int64) (*NewLocationResponse, error) {
 	path := fmt.Sprintf("%s/ingest/migrations/%s/files", api.config.ApiAddress, input.Id)
 
 	req, err := http.NewRequest("POST", path, nil)
@@ -173,7 +173,7 @@ func (api *ApiClient) CreateTemporaryLocationForFiles(input *MigrationResponse, 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Tus-resumable", "1.0.0")
-	req.Header.Set("Upload-Length", strconv.FormatInt(contentLength, 10))
+	req.Header.Set("Upload-Length", strconv.FormatInt(contentLength-headerSize, 10))
 	req.Header.Set("Upload-Metadata", fmt.Sprintf("filename %s,content-type %s", b64.StdEncoding.EncodeToString([]byte(fileName)), b64.StdEncoding.EncodeToString([]byte("application/octet-stream"))))
 
 	result, err := api.performHttpRequest(req)
@@ -184,19 +184,12 @@ func (api *ApiClient) CreateTemporaryLocationForFiles(input *MigrationResponse, 
 	return &NewLocationResponse{result.header.Get("Location")}, nil
 }
 
-func (api *ApiClient) UploadDataToLocation(buffer []byte, location string, migrationId string, offset int64, buffSize int) ([]byte, error) {
+func (api *ApiClient) UploadDataToLocation(reader io.Reader, location string, migrationId string, uploadOffset int64) ([]byte, error) {
 	locationPath := strings.Split(location, "/")
 
-	uploadOffset := offset - int64(buffSize)
-
-	if uploadOffset < 0 {
-		uploadOffset = 0
-	}
-
 	path := fmt.Sprintf("%s/ingest/migrations/%s/files/%s", api.config.ApiAddress, migrationId, locationPath[len(locationPath)-1])
-	chunk := bytes.NewReader(buffer)
 
-	req, err := http.NewRequest("PATCH", path, chunk)
+	req, err := http.NewRequest("PATCH", path, reader)
 	if err != nil {
 		return nil, err
 	}

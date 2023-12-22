@@ -64,3 +64,21 @@ BEGIN
 END;
 
 $set_verified$ LANGUAGE plpgsql;
+
+CREATE FUNCTION set_decrypted_info(file_uuid UUID, archive_checksum TEXT, archive_checksum_type TEXT, decrypted_size BIGINT, decrypted_checksum TEXT, decrypted_checksum_type TEXT, decrypted_md5 TEXT)
+    RETURNS void AS $set_decrypted_info$
+BEGIN
+UPDATE sda.files SET decrypted_file_size = decrypted_size WHERE id = file_uuid;
+
+INSERT INTO sda.checksums(file_id, checksum, type, source)
+VALUES(file_uuid, archive_checksum, upper(archive_checksum_type)::sda.checksum_algorithm, upper('ARCHIVED')::sda.checksum_source);
+
+INSERT INTO sda.checksums(file_id, checksum, type, source)
+VALUES(file_uuid, decrypted_checksum, upper(decrypted_checksum_type)::sda.checksum_algorithm, upper('UNENCRYPTED')::sda.checksum_source);
+
+INSERT INTO sda.checksums(file_id, checksum, type, source)
+VALUES(file_uuid, decrypted_md5, upper('MD5')::sda.checksum_algorithm, upper('UNENCRYPTED')::sda.checksum_source);
+
+END;
+
+$set_decrypted_info$ LANGUAGE plpgsql;

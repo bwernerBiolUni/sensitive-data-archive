@@ -210,6 +210,46 @@ func (dbs *SQLdb) MarkCompleted(fileID, corrID string) error {
 	return err
 }
 
+// SetDecryptedInfo insert decrypted checksums for file
+func (dbs *SQLdb) SetDecryptedInfo(file FileInfo, fileID string, decryptedMd5 hash.Hash) error {
+	var (
+		err   error
+		count int
+	)
+
+	for count == 0 || (err != nil && count < dbRetryTimes) {
+		err = dbs.setDecryptedInfo(file, fileID, decryptedMd5)
+		count++
+	}
+
+	return err
+}
+
+// setDecryptedInfo performs actual work for SetDecryptedInfo
+func (dbs *SQLdb) setDecryptedInfo(file FileInfo, fileID string, decryptedMd5 hash.Hash) error {
+	dbs.checkAndReconnectIfNeeded()
+
+	db := dbs.DB
+	const completed = "SELECT sda.set_decrypted_info($1, $2, $3, $4, $5, $6, $7);"
+	result, err := db.Exec(completed,
+		fileID,
+		fmt.Sprintf("%x", file.Checksum.Sum(nil)),
+		hashType(file.Checksum),
+		file.DecryptedSize,
+		fmt.Sprintf("%x", file.DecryptedChecksum.Sum(nil)),
+		hashType(file.DecryptedChecksum),
+		fmt.Sprintf("%x", decryptedMd5.Sum(nil)),
+	)
+	if err != nil {
+		return err
+	}
+	if rowsAffected, _ := result.RowsAffected(); rowsAffected == 0 {
+		return errors.New("something went wrong with the query zero rows were changed")
+	}
+
+	return nil
+}
+
 // markCompleted performs actual work for MarkCompleted
 func (dbs *SQLdb) markCompleted(fileID, corrID string) error {
 	dbs.checkAndReconnectIfNeeded()
